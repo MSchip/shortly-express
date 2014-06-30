@@ -1,7 +1,7 @@
 var express = require('express');
 var util = require('./lib/utility');
 var partials = require('express-partials');
-var bcrypt = require('bcrypt-nodejs');
+var bcrypt = require('bcrypt');
 var db = require('./app/config');
 var Users = require('./app/collections/users');
 var User = require('./app/models/user');
@@ -15,20 +15,21 @@ app.configure(function() {
   app.set('views', __dirname + '/views');
   app.set('view engine', 'ejs');
   app.use(partials());
-  app.use(express.bodyParser());
-  app.use(express.cookieParser('shhhh, very secret'));
+  app.use(express.cookieParser('Shhhh this is a secret'));
   app.use(express.session());
+  app.use(express.bodyParser())
   app.use(express.static(__dirname + '/public'));
 });
 
-function restrict(req, res, next) {
-  if (req.session.username) {
-    next();
+var restricted = function(req,res,next){
+  if(req.session.username){
+    next()
   } else {
-    req.session.error = 'Access denied!';
-    res.redirect('/login');
+    req.session.error = 'Access Denied!!';
+    req.redirect('/login');
   }
-}
+};
+
 
 app.get('/', function(req, res) {
   res.render('index');
@@ -43,12 +44,6 @@ app.get('/links', function(req, res) {
     res.send(200, links.models);
   })
 });
-app.get('/users', function(req, res){
-  Users.reset().fetch().then( function ( users ){
-    res.send(200, users.models);
-  })
-});
-
 
 app.post('/links', function(req, res) {
   var uri = req.body.url;
@@ -83,70 +78,90 @@ app.post('/links', function(req, res) {
   });
 });
 
+app.get('/users', function(req,res){
+  Users.reset().fetch().then(function(users) {
+    res.send(200, users.models);
+  });
+});
+
 /************************************************************/
 // Write your authentication routes here
 /************************************************************/
 
-// render the login view
+// render the login page
 app.get('/login', function(req, res){
   res.render('login');
 });
-
-// Verify login credentials,
-  //if verified set session properties
-  // else redirect to login
-app.post('/login', function(req, res){
-  // Creat user variables
+// deal with validating the users credentials
+app.post('/login', function ( req, res ){
   var username = req.body.username;
   var password = req.body.password;
 
-  new User({username: username, password: password}).fetch().then(function ( found ){
+  new swoUser({ username: username, pasrd: password }).fetch().then(function(found) {
     if(found){
-
-      //regenerate the sessions
-      // set the new session username
-      // set the users session paramater
-      console.log("found ", found);
+      // Log the user in
+      req.session.regenerate(function(){
+        res.session.username = username;
+        res.redirect('/res')
+      });
+      // create a new session
+      // Store the session token on the user instance
+      console.log("found", found)
     } else {
-      res.redirect('/login');
-      console.log("Authentication failed");
+      // response.send and error
+      console.log('Authentication Failed');
+      res.send('Please Re input you credentials');
     }
   });
 });
-
-
-// render the signup view
+// render the signup page
 app.get('/signup', function(req, res){
   res.render('signup');
 });
 
-// create a new user instance
-  // verify that the user does not alread exist
-  // if the user does exist
-      // redirect to '/login'
-  // else if the user does not exist
-      // create a new User and pass the variables in
-      // add the new user to the User collection
-      // log the user in, setting the session
-app.post('/signup', function(req, res){
-  new User({username: username, password: password}).fetch().then(function ( found ){
+// this will deal with validating and creating a new User
+//  then adding the user to the collection of Users
+//  and hashing the input password
+app.post('/signup', function ( req, res ){
+  var username = req.body.username;
+  var password = req.body.password;
+  var salt = bcrypt.genSaltSync(10);
+  var hash = bcrypt.hashSync(password, salt);
+
+
+
+  // //hash the password
+
+
+  new User({ username: username, password:hash }).fetch().then(function(found) {
     if(found){
-      console.log("User already Created")
-      res.redirect('/login');
+      console.log("Please use a different name");
     } else {
-
-      // Hash Password
-        //var salt = bcrypt.genSaltSync(10);
-        //var hash = bcrypt.hashSync(password, salt);
-      // create a new instance of the user
-        // var user = new User({username: username, password: hash});
-      // then add the new user to the collection of users;
-        // Users.add(user);
-
-      // redirect to '/'
-
+      var user = new User({
+        username: username,
+        password: hash
+      });
+      user.save().then(function(newUser){
+        Users.add(newUser);
+        res.send(200, newUser);
+      });
+      console.log(Users);
     }
+
   });
+  //   if(found){
+  //     console.log("Please use a different name");
+  //   } else {
+  //     console.log(user.password)
+  //     Users.add(user);
+  //     res.redirect('/login');
+  //   }
+  // });
+
+
+
+
+
 });
 
 
@@ -177,27 +192,5 @@ app.get('/*', function(req, res) {
     }
   });
 });
-
-app.get('/restricted', restrict, function(request, response){
-  response.send('This is the restricted area! Hello ' + request.session.username + '! click <a href="/logout">here to logout</a>');
-});
-
-
 console.log('Shortly is listening on 4568');
 app.listen(4568);
-
-
-
-
-
-  // var userObj = db.users.findOne({ username: username, password: hash });
-  // var userObj = Users
-  // console.log(userObj);
-  // if(userObj){
-  //   req.session.regenerate(function(){
-  //     req.session.username = userObj.username;
-  //     res.redirect('/restricted');
-  //   });
-  // } else {
-  //   res.redirect('login');
-  // }
